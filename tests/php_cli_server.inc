@@ -37,6 +37,7 @@ function php_cli_server_start($code = 'echo "Hello world";', $router = 'index.ph
 			$cmd .= " {$router}";
 		}
 		$cmd .= " 2>/dev/null";
+                file_put_contents("/tmp/tmp","$doc_root\n$cmd\n");
 		$handle = proc_open($cmd, $descriptorspec, $pipes, $doc_root);
 	}
 

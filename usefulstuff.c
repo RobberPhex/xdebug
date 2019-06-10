@@ -53,7 +53,7 @@ ZEND_EXTERN_MODULE_GLOBALS(xdebug)
 
 #define READ_BUFFER_SIZE 128
 
-char* xdebug_fd_read_line_delim(int socketfd, fd_buf *context, int type, unsigned char delim, int *length)
+int xdebug_fd_read_line_delim(int socketfd, fd_buf *context, int type, int block, unsigned char delim, char **cmd, int *length)
 {
 	int size = 0, newl = 0, nbufsize = 0;
 	char *tmp;
@@ -66,7 +66,7 @@ char* xdebug_fd_read_line_delim(int socketfd, fd_buf *context, int type, unsigne
 		context->buffer_size = 0;
 	}
 
-	while (context->buffer_size < 1 || context->buffer[context->buffer_size - 1] != delim) {
+	while ((ptr = memchr(context->buffer, delim, context->buffer_size)) == NULL) {
 		ptr = context->buffer + context->buffer_size;
 		if (type == FD_RL_FILE) {
 			newl = read(socketfd, buffer, READ_BUFFER_SIZE);
@@ -78,17 +78,32 @@ char* xdebug_fd_read_line_delim(int socketfd, fd_buf *context, int type, unsigne
 			memcpy(context->buffer + context->buffer_size, buffer, newl);
 			context->buffer_size += newl;
 			context->buffer[context->buffer_size] = '\0';
-		} else if (newl == -1 && errno == EINTR) {
-			continue;
+		} else if (newl == -1) {
+#ifndef WIN32
+			if (errno == EINTR) {
+				continue;
+			}
+			if (errno == EAGAIN) {
+				return 0;
+			}
+#else
+			int lasterr = WSAGetLastError();
+
+			if (lasterr == WSAEINTR) {
+				continue;
+			}
+			if (lasterr == WSAEWOULDBLOCK) {
+				return 0;
+			}
+#endif
 		} else {
 			free(context->buffer);
 			context->buffer = NULL;
 			context->buffer_size = 0;
-			return NULL;
+			return 1;
 		}
 	}
 
-	ptr = memchr(context->buffer, delim, context->buffer_size);
 	size = ptr - context->buffer;
 	/* Copy that line into tmp */
 	tmp = malloc(size + 1);
@@ -98,7 +113,7 @@ char* xdebug_fd_read_line_delim(int socketfd, fd_buf *context, int type, unsigne
 	if ((nbufsize = context->buffer_size - size - 1)  > 0) {
 		tmp_buf = malloc(nbufsize + 1);
 		memcpy(tmp_buf, ptr + 1, nbufsize);
-		tmp_buf[nbufsize] = 0;
+		tmp_buf[nbufsize] = '\0';
 	}
 	free(context->buffer);
 	context->buffer = tmp_buf;
@@ -107,8 +122,9 @@ char* xdebug_fd_read_line_delim(int socketfd, fd_buf *context, int type, unsigne
 	/* Return normal line */
 	if (length) {
 		*length = size;
+		*cmd = tmp;
 	}
-	return tmp;
+	return 0;
 }
 
 xdebug_str* xdebug_join(const char *delim, xdebug_arg *args, int begin, int end)

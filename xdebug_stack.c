@@ -621,6 +621,7 @@ void xdebug_error_cb(int type, const char *error_filename, const unsigned int er
 	xdebug_brk_info *extra_brk_info = NULL;
 	error_handling_t  error_handling;
 	zend_class_entry *exception_class;
+	int block = XDEBUG_CMDLOOP_NONBLOCK;
 
 	TSRMLS_FETCH();
 
@@ -741,6 +742,7 @@ void xdebug_error_cb(int type, const char *error_filename, const unsigned int er
 		) {
 			if (xdebug_handle_hit_value(extra_brk_info)) {
 				char *type_str = xdebug_sprintf("%ld", type);
+				block = XDEBUG_CMDLOOP_BLOCK;
 
 				if (!XG(context).handler->remote_breakpoint(&(XG(context)), XG(stack), (char *) error_filename, error_lineno, XDEBUG_BREAK, error_type_str, type_str, buffer)) {
 					xdebug_mark_debug_connection_not_active();
@@ -751,6 +753,9 @@ void xdebug_error_cb(int type, const char *error_filename, const unsigned int er
 		}
 	}
 	xdfree(error_type_str);
+	if (xdebug_is_debug_connection_active_for_current_pid() && XG(breakpoints_allowed)) {
+		XG(context).handler->cmdloop(&(XG(context)), block, 1 TSRMLS_CC);
+	}
 
 	if (type & XG(halt_level) & XDEBUG_ALLOWED_HALT_LEVELS) {
 		type = E_USER_ERROR;

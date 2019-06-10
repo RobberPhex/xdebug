@@ -111,6 +111,9 @@ extern const char* xdebug_log_prefix[11];
 #define REASON_ABORTED    2
 #define REASON_EXCEPTION  3
 
+#define XDEBUG_CMDLOOP_BLOCK                         1
+#define XDEBUG_CMDLOOP_NONBLOCK                      0
+
 #define XDEBUG_ERROR_OK                              0
 #define XDEBUG_ERROR_PARSE                           1
 #define XDEBUG_ERROR_DUP_ARG                         2

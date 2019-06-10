@@ -157,7 +157,7 @@ xdebug_breakpoint_entry xdebug_breakpoint_types[XDEBUG_BREAKPOINT_TYPES_COUNT] =
 ** Prototypes for debug command handlers
 */
 
-/* DBGP_FUNC(break); */
+DBGP_FUNC(break);
 DBGP_FUNC(breakpoint_get);
 DBGP_FUNC(breakpoint_list);
 DBGP_FUNC(breakpoint_remove);
@@ -200,7 +200,7 @@ DBGP_FUNC(xcmd_get_executable_lines);
 */
 
 static xdebug_dbgp_cmd dbgp_commands[] = {
-	/* DBGP_FUNC_ENTRY(break) */
+	DBGP_FUNC_ENTRY(break,             XDEBUG_DBGP_NONE)
 	DBGP_FUNC_ENTRY(breakpoint_get,    XDEBUG_DBGP_NONE)
 	DBGP_FUNC_ENTRY(breakpoint_list,   XDEBUG_DBGP_POST_MORTEM)
 	DBGP_FUNC_ENTRY(breakpoint_remove, XDEBUG_DBGP_NONE)
@@ -289,6 +289,19 @@ static xdebug_str *make_message(xdebug_con *context, xdebug_xml_node *message TS
 	xdebug_str_destroy(&xml_message);
 
 	return ret;
+}
+
+static int xdebug_is_paused(int status) {
+	if (status == DBGP_STATUS_BREAK) {
+		return 1;
+	}
+	if (status == DBGP_STATUS_STARTING) {
+		return 1;
+	}
+	if (status == DBGP_STATUS_STOPPING) {
+		return 1;
+	}
+	return 0;
 }
 
 static void send_message_ex(xdebug_con *context, xdebug_xml_node *message, int stage TSRMLS_DC)
@@ -754,7 +767,7 @@ static int breakpoint_remove(int type, char *hkey)
 
 
 
-static void breakpoint_do_action(DBGP_FUNC_PARAMETERS, int action)
+static int breakpoint_do_action(DBGP_FUNC_PARAMETERS, int action)
 {
 	int                   type;
 	char                 *hkey;
@@ -798,24 +811,37 @@ static void breakpoint_do_action(DBGP_FUNC_PARAMETERS, int action)
 			breakpoint_remove(type, hkey);
 			breakpoint_admin_remove(context, CMD_OPTION_CHAR('d'));
 		}
+		return XDEBUG_CMD_OK;
 	} else {
 		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_NO_SUCH_BREAKPOINT)
 	}
 }
 
+DBGP_FUNC(break)
+{
+	XG(context).do_break = 1;
+	if (XG(status) == DBGP_STATUS_RUNNING) {
+		xdebug_xml_add_attribute(*retval, "status", xdebug_dbgp_status_strings[XG(status)]);
+		xdebug_xml_add_attribute(*retval, "reason", xdebug_dbgp_reason_strings[XG(reason)]);
+		return XDEBUG_CMD_BREAK;
+	} else {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
+}
+
 DBGP_FUNC(breakpoint_get)
 {
-	breakpoint_do_action(DBGP_FUNC_PASS_PARAMETERS, BREAKPOINT_ACTION_GET);
+	return breakpoint_do_action(DBGP_FUNC_PASS_PARAMETERS, BREAKPOINT_ACTION_GET);
 }
 
 DBGP_FUNC(breakpoint_remove)
 {
-	breakpoint_do_action(DBGP_FUNC_PASS_PARAMETERS, BREAKPOINT_ACTION_REMOVE);
+	return breakpoint_do_action(DBGP_FUNC_PASS_PARAMETERS, BREAKPOINT_ACTION_REMOVE);
 }
 
 DBGP_FUNC(breakpoint_update)
 {
-	breakpoint_do_action(DBGP_FUNC_PASS_PARAMETERS, BREAKPOINT_ACTION_UPDATE);
+	return breakpoint_do_action(DBGP_FUNC_PASS_PARAMETERS, BREAKPOINT_ACTION_UPDATE);
 }
 
 
@@ -835,6 +861,7 @@ static void breakpoint_list_helper(void *xml, xdebug_hash_element *he)
 DBGP_FUNC(breakpoint_list)
 {
 	xdebug_hash_apply(context->breakpoint_list, (void *) *retval, breakpoint_list_helper);
+	return XDEBUG_CMD_OK;
 }
 
 DBGP_FUNC(breakpoint_set)
@@ -1010,6 +1037,7 @@ DBGP_FUNC(breakpoint_set)
 
 	xdebug_xml_add_attribute_ex(*retval, "id", xdebug_sprintf("%lu", brk_info->id), 0, 1);
 	breakpoint_brk_info_add_resolved(*retval, brk_info);
+	return XDEBUG_CMD_OK;
 }
 
 static int xdebug_do_eval(char *eval_string, zval *ret_zval TSRMLS_DC)
@@ -1066,6 +1094,10 @@ DBGP_FUNC(eval)
 	int              res;
 	xdebug_var_export_options *options;
 
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
+
 	if (!CMD_OPTION_SET('-')) {
 		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_INVALID_ARGS);
 	}
@@ -1093,6 +1125,7 @@ DBGP_FUNC(eval)
 		xdebug_xml_add_child(*retval, ret_xml);
 		zval_ptr_dtor(&ret_zval);
 	}
+	return XDEBUG_CMD_OK;
 }
 
 /* these functions interupt PHP's output functions, so we can
@@ -1121,6 +1154,7 @@ static void xdebug_send_stream(const char *name, const char *str, unsigned int s
 DBGP_FUNC(stderr)
 {
 	xdebug_xml_add_attribute(*retval, "success", "0");
+	return XDEBUG_CMD_OK;
 }
 
 DBGP_FUNC(stdout)
@@ -1137,6 +1171,7 @@ DBGP_FUNC(stdout)
 	success = "1";
 
 	xdebug_xml_add_attribute_ex(*retval, "success", xdstrdup(success), 0, 1);
+	return XDEBUG_CMD_OK;
 }
 
 DBGP_FUNC(stop)
@@ -1144,23 +1179,42 @@ DBGP_FUNC(stop)
 	XG(status) = DBGP_STATUS_STOPPED;
 	xdebug_xml_add_attribute(*retval, "status", xdebug_dbgp_status_strings[XG(status)]);
 	xdebug_xml_add_attribute(*retval, "reason", xdebug_dbgp_reason_strings[XG(reason)]);
+	return XDEBUG_CMD_BREAK;
 }
 
 DBGP_FUNC(run)
 {
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
+	MARK_RUNNING(run)
+
 	xdebug_xml_add_attribute_ex(*retval, "filename", xdstrdup(context->program_name), 0, 1);
+	return XDEBUG_CMD_CONT;
 }
 
 DBGP_FUNC(step_into)
 {
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
+	MARK_RUNNING(step_into);
+
 	XG(context).do_next   = 0;
 	XG(context).do_step   = 1;
 	XG(context).do_finish = 0;
+	return XDEBUG_CMD_CONT;
 }
 
 DBGP_FUNC(step_out)
 {
 	function_stack_entry *fse;
+
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
+
+	MARK_RUNNING(step_out);
 
 	XG(context).do_next   = 0;
 	XG(context).do_step   = 0;
@@ -1173,11 +1227,18 @@ DBGP_FUNC(step_out)
 		XG(context).finish_level = -1;
 		XG(context).finish_func_nr = -1;
 	}
+	return XDEBUG_CMD_CONT;
 }
 
 DBGP_FUNC(step_over)
 {
 	function_stack_entry *fse;
+
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
+
+	MARK_RUNNING(step_over);
 
 	XG(context).do_next   = 1;
 	XG(context).do_step   = 0;
@@ -1188,17 +1249,25 @@ DBGP_FUNC(step_over)
 	} else {
 		XG(context).next_level = 0;
 	}
+	return XDEBUG_CMD_CONT;
 }
 
 DBGP_FUNC(detach)
 {
 	XG(status) = DBGP_STATUS_DETACHED;
+	XG(lastcmd) = "detach";
+	if (XG(lasttransid)) {
+		xdfree(XG(lasttransid));
+	}
+	XG(lasttransid) = xdstrdup(CMD_OPTION_CHAR('i'));
+
 	xdebug_xml_add_attribute(*retval, "status", xdebug_dbgp_status_strings[DBGP_STATUS_STOPPED]);
 	xdebug_xml_add_attribute(*retval, "reason", xdebug_dbgp_reason_strings[XG(reason)]);
 	XG(context).handler->remote_deinit(&(XG(context)));
 	xdebug_mark_debug_connection_not_active();
 	XG(stdout_mode) = 0;
 	XG(remote_enable) = 0;
+	return XDEBUG_CMD_BREAK;
 }
 
 
@@ -1210,7 +1279,9 @@ DBGP_FUNC(source)
 	function_stack_entry *fse;
 
 	if (!CMD_OPTION_SET('f')) {
-		if ((fse = xdebug_get_stack_tail(TSRMLS_C))) {
+		if (!xdebug_is_paused(XG(status))) {
+			RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+		} else if ((fse = xdebug_get_stack_tail(TSRMLS_C))) {
 			filename = fse->filename;
 		} else {
 			RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_STACK_DEPTH_INVALID);
@@ -1236,6 +1307,7 @@ DBGP_FUNC(source)
 	} else {
 		xdebug_xml_add_text_ex(*retval, xdstrdup(source->d), source->l, 1, 1);
 		xdebug_str_free(source);
+		return XDEBUG_CMD_OK;
 	}
 }
 
@@ -1345,6 +1417,7 @@ DBGP_FUNC(feature_get)
 			xdebug_xml_add_attribute(*retval, "supported", lookup_cmd(CMD_OPTION_CHAR('n')) ? "1" : "0");
 		XDEBUG_STR_CASE_DEFAULT_END
 	}
+	return XDEBUG_CMD_OK;
 }
 
 DBGP_FUNC(feature_set)
@@ -1413,6 +1486,7 @@ DBGP_FUNC(feature_set)
 	}
 	xdebug_xml_add_attribute_ex(*retval, "feature", xdstrdup(CMD_OPTION_CHAR('n')), 0, 1);
 	xdebug_xml_add_attribute_ex(*retval, "success", "1", 0, 0);
+	return XDEBUG_CMD_OK;
 }
 
 DBGP_FUNC(typemap_get)
@@ -1433,6 +1507,7 @@ DBGP_FUNC(typemap_get)
 		}
 		xdebug_xml_add_child(*retval, type);
 	}
+	return XDEBUG_CMD_OK;
 }
 
 static int add_constant_node(xdebug_xml_node *node, xdebug_str *name, zval *const_val, xdebug_var_export_options *options TSRMLS_DC)
@@ -1468,6 +1543,10 @@ DBGP_FUNC(property_get)
 	function_stack_entry      *fse;
 	int                        old_max_data;
 	xdebug_var_export_options *options = (xdebug_var_export_options*) context->options;
+
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
 
 	if (!CMD_OPTION_SET('n')) {
 		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_INVALID_ARGS);
@@ -1541,6 +1620,7 @@ DBGP_FUNC(property_get)
 		}
 	}
 	options->max_data = old_max_data;
+	return XDEBUG_CMD_OK;
 }
 
 static void set_vars_from_EG(TSRMLS_D)
@@ -1561,6 +1641,10 @@ DBGP_FUNC(property_set)
 	xdebug_var_export_options *options = (xdebug_var_export_options*) context->options;
 	zend_execute_data         *original_execute_data;
 	XDEBUG_STR_SWITCH_DECL;
+
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
 
 	if (!CMD_OPTION_SET('n')) { /* name */
 		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_INVALID_ARGS);
@@ -1663,6 +1747,7 @@ DBGP_FUNC(property_set)
 		zval_dtor(&ret_zval);
 		xdebug_xml_add_attribute(*retval, "success", "1");
 	}
+	return XDEBUG_CMD_OK;
 }
 
 static int add_variable_contents_node(xdebug_xml_node *node, xdebug_str *name, int var_only, int non_null, int no_eval, xdebug_var_export_options *options TSRMLS_DC)
@@ -1683,6 +1768,10 @@ DBGP_FUNC(property_value)
 	function_stack_entry      *fse;
 	int                        old_max_data;
 	xdebug_var_export_options *options = (xdebug_var_export_options*) context->options;
+
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
 
 	if (!CMD_OPTION_SET('n')) {
 		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_INVALID_ARGS);
@@ -1736,6 +1825,7 @@ DBGP_FUNC(property_value)
 		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_PROPERTY_NON_EXISTENT);
 	}
 	options->max_data = old_max_data;
+	return XDEBUG_CMD_OK;
 }
 
 static void attach_declared_var_with_contents(void *xml, xdebug_hash_element* he, void *options)
@@ -1911,7 +2001,11 @@ static int attach_context_vars(xdebug_xml_node *node, xdebug_var_export_options 
 
 DBGP_FUNC(stack_depth)
 {
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
 	xdebug_xml_add_attribute_ex(*retval, "depth", xdebug_sprintf("%lu", XG(level)), 0, 1);
+	return XDEBUG_CMD_OK;
 }
 
 DBGP_FUNC(stack_get)
@@ -1920,6 +2014,10 @@ DBGP_FUNC(stack_get)
 	xdebug_llist_element *le;
 	int                   counter = 0;
 	long                  depth;
+
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
 
 	if (CMD_OPTION_SET('d')) {
 		depth = strtol(CMD_OPTION_CHAR('d'), NULL, 10);
@@ -1937,18 +2035,24 @@ DBGP_FUNC(stack_get)
 			counter++;
 		}
 	}
+	return XDEBUG_CMD_OK;
 }
 
 DBGP_FUNC(status)
 {
 	xdebug_xml_add_attribute(*retval, "status", xdebug_dbgp_status_strings[XG(status)]);
 	xdebug_xml_add_attribute(*retval, "reason", xdebug_dbgp_reason_strings[XG(reason)]);
+	return 0;
 }
 
 
 DBGP_FUNC(context_names)
 {
 	xdebug_xml_node *child;
+
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
 
 	child = xdebug_xml_node_init("context");
 	xdebug_xml_add_attribute(child, "name", "Locals");
@@ -1964,6 +2068,7 @@ DBGP_FUNC(context_names)
 	xdebug_xml_add_attribute(child, "name", "User defined constants");
 	xdebug_xml_add_attribute(child, "id", "2");
 	xdebug_xml_add_child(*retval, child);
+	return XDEBUG_CMD_OK;
 }
 
 DBGP_FUNC(context_get)
@@ -1972,6 +2077,10 @@ DBGP_FUNC(context_get)
 	int                        context_id = 0;
 	int                        depth = 0;
 	xdebug_var_export_options *options = (xdebug_var_export_options*) context->options;
+
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
 
 	if (CMD_OPTION_SET('c')) {
 		context_id = atol(CMD_OPTION_CHAR('c'));
@@ -1990,12 +2099,14 @@ DBGP_FUNC(context_get)
 	}
 
 	xdebug_xml_add_attribute_ex(*retval, "context", xdebug_sprintf("%d", context_id), 0, 1);
+	return XDEBUG_CMD_OK;
 }
 
 DBGP_FUNC(xcmd_profiler_name_get)
 {
 	if (XG(profiler_enabled) && XG(profile_filename)) {
 		xdebug_xml_add_text(*retval, xdstrdup(XG(profile_filename)));
+		return 0;
 	} else {
 		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_PROFILING_NOT_STARTED);
 	}
@@ -2007,6 +2118,10 @@ DBGP_FUNC(xcmd_get_executable_lines)
 	unsigned int          i;
 	long                  depth;
 	xdebug_xml_node      *lines, *line;
+
+	if (!xdebug_is_paused(XG(status))) {
+		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_COMMAND_UNAVAILABLE);
+	}
 
 	if (!CMD_OPTION_SET('d')) {
 		RETURN_RESULT(XG(status), XG(reason), XDEBUG_ERROR_INVALID_ARGS);
@@ -2028,6 +2143,7 @@ DBGP_FUNC(xcmd_get_executable_lines)
 		}
 	}
 	xdebug_xml_add_child(*retval, lines);
+	return XDEBUG_CMD_OK;
 }
 
 
@@ -2226,26 +2342,7 @@ static int xdebug_dbgp_parse_option(xdebug_con *context, char* line, int flags, 
 		command = lookup_cmd(cmd);
 
 		if (command) {
-			if (command->cont) {
-				XG(status) = DBGP_STATUS_RUNNING;
-				XG(reason) = DBGP_REASON_OK;
-			}
-			XG(lastcmd) = command->name;
-			if (XG(lasttransid)) {
-				xdfree(XG(lasttransid));
-			}
-			XG(lasttransid) = xdstrdup(CMD_OPTION_CHAR('i'));
-			if (XG(status) != DBGP_STATUS_STOPPING || (XG(status) == DBGP_STATUS_STOPPING && command->flags & XDEBUG_DBGP_POST_MORTEM)) {
-				command->handler((xdebug_xml_node**) &retval, context, args TSRMLS_CC);
-				ret = command->cont;
-			} else {
-				error = xdebug_xml_node_init("error");
-				xdebug_xml_add_attribute_ex(error, "code", xdebug_sprintf("%lu", XDEBUG_ERROR_COMMAND_UNAVAILABLE), 0, 1);
-				ADD_REASON_MESSAGE(XDEBUG_ERROR_COMMAND_UNAVAILABLE);
-				xdebug_xml_add_child(retval, error);
-
-				ret = -1;
-			}
+			ret = command->handler((xdebug_xml_node**) &retval, context, args TSRMLS_CC);
 		} else {
 			error = xdebug_xml_node_init("error");
 			xdebug_xml_add_attribute_ex(error, "code", xdebug_sprintf("%lu", XDEBUG_ERROR_UNIMPLEMENTED), 0, 1);
@@ -2265,35 +2362,65 @@ static int xdebug_dbgp_parse_option(xdebug_con *context, char* line, int flags, 
 ** Handlers for debug functions
 */
 
-static int xdebug_dbgp_cmdloop(xdebug_con *context, int bail TSRMLS_DC)
+int xdebug_dbgp_cmdloop(xdebug_con *context, int block, int bail TSRMLS_DC)
 {
 	char *option;
-	int   ret;
+	int    ret;
+	int    length;
 	xdebug_xml_node *response;
 
+#if WIN32|WINNT
+	u_long                     yes = 1;
+	u_long                     no = 0;
+	int                        status;
+#endif
+
 	do {
-		option = xdebug_fd_read_line_delim(context->socket, context->buffer, FD_RL_SOCKET, '\0', NULL);
-		if (!option) {
-			return 0;
+		option = NULL;
+		length = 0;
+		if (!block) {
+#ifdef WIN32
+			status = ioctlsocket(context->socket, FIONBIO, &yes);
+			if (SOCKET_ERROR == status) {
+				XG(context).handler->log(XDEBUG_LOG_WARN, "setting socket to FIONBIO: %d.\n", WSAGetLastError());
+			}
+#else
+			fcntl(context->socket, F_SETFL, O_NONBLOCK);
+#endif
+		}
+		ret = xdebug_fd_read_line_delim(context->socket, context->buffer, FD_RL_SOCKET, block, '\0', &option, &length);
+		// set it back
+		if (!block) {
+#ifdef WIN32
+			status = ioctlsocket(context->socket, FIONBIO, &no);
+			if (SOCKET_ERROR == status) {
+				XG(context).handler->log(XDEBUG_LOG_WARN, "setting socket not to FIONBIO: %d.\n", WSAGetLastError());
+			}
+#else
+			int flags = fcntl(context->socket, F_GETFL, 0);
+			fcntl(context->socket, F_SETFL, flags & ~O_NONBLOCK);
+#endif
+		}
+		if (ret || length <= 0) {
+			return ret;
 		}
 
 		response = xdebug_xml_node_init("response");
 		xdebug_xml_add_attribute(response, "xmlns", "urn:debugger_protocol_v1");
 		xdebug_xml_add_attribute(response, "xmlns:xdebug", "https://xdebug.org/dbgp/xdebug");
 		ret = xdebug_dbgp_parse_option(context, option, 0, response TSRMLS_CC);
-		if (ret != 1) {
+		if (ret != XDEBUG_CMD_CONT) {
 			send_message(context, response TSRMLS_CC);
 		}
 		xdebug_xml_node_dtor(response);
 
 		free(option);
-	} while (0 == ret);
+	} while (ret <= 0);
 
 	if (bail && XG(status) == DBGP_STATUS_STOPPED) {
 		_zend_bailout((char*)__FILE__, __LINE__);
 	}
 	return ret;
-
 }
 
 int xdebug_dbgp_init(xdebug_con *context, int mode)
@@ -2386,7 +2513,7 @@ int xdebug_dbgp_init(xdebug_con *context, int mode)
 	context->inhibit_notifications = 0;
 	context->resolved_breakpoints = 0;
 
-	xdebug_dbgp_cmdloop(context, 1 TSRMLS_CC);
+	xdebug_dbgp_cmdloop(context, XDEBUG_CMDLOOP_BLOCK, 1 TSRMLS_CC);
 
 	return 1;
 }
@@ -2415,7 +2542,7 @@ int xdebug_dbgp_deinit(xdebug_con *context)
 		send_message(context, response TSRMLS_CC);
 		xdebug_xml_node_dtor(response);
 
-		xdebug_dbgp_cmdloop(context, 0 TSRMLS_CC);
+		xdebug_dbgp_cmdloop(context, XDEBUG_CMDLOOP_BLOCK, 0 TSRMLS_CC);
 	}
 
 	if (xdebug_is_debug_connection_active_for_current_pid()) {
@@ -2503,7 +2630,7 @@ int xdebug_dbgp_error(xdebug_con *context, int type, char *exception_type, char 
 		xdfree(errortype);
 	}
 
-	xdebug_dbgp_cmdloop(context, 1 TSRMLS_CC);
+	xdebug_dbgp_cmdloop(context, XDEBUG_CMDLOOP_BLOCK, 1 TSRMLS_CC);
 
 	return 1;
 }
@@ -2599,8 +2726,6 @@ int xdebug_dbgp_breakpoint(xdebug_con *context, xdebug_llist *stack, char *file,
 		xdfree(XG(lasttransid));
 		XG(lasttransid) = NULL;
 	}
-
-	xdebug_dbgp_cmdloop(context, 1 TSRMLS_CC);
 
 	return 1;
 }

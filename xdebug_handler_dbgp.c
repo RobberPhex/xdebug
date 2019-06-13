@@ -2418,6 +2418,7 @@ int xdebug_dbgp_cmdloop(xdebug_con *context, int block, int bail TSRMLS_DC)
 	} while (ret <= 0);
 
 	if (bail && XG(status) == DBGP_STATUS_STOPPED) {
+		xdebug_mark_debug_connection_not_active();
 		_zend_bailout((char*)__FILE__, __LINE__);
 	}
 	return ret;
@@ -2512,8 +2513,6 @@ int xdebug_dbgp_init(xdebug_con *context, int mode)
 	context->send_notifications = 0;
 	context->inhibit_notifications = 0;
 	context->resolved_breakpoints = 0;
-
-	xdebug_dbgp_cmdloop(context, XDEBUG_CMDLOOP_BLOCK, 1 TSRMLS_CC);
 
 	return 1;
 }

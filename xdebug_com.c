@@ -458,6 +458,7 @@ static void xdebug_init_debugger()
 			zend_string_release(ini_name);
 
 			xdebug_mark_debug_connection_active();
+			XG(context).handler->cmdloop(&(XG(context)), XDEBUG_CMDLOOP_BLOCK, 1 TSRMLS_CC);
 		}
 	} else if (XG(context).socket == -1) {
 		XG(context).handler->log(XDEBUG_LOG_ERR, "Could not connect to client. :-(\n");
